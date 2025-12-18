@@ -7,6 +7,10 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
+import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = FastAPI(title="Crowd Shield API")
 
@@ -22,6 +26,8 @@ app.add_middleware(
 # Configuration
 UPLOAD_DIR = "uploaded_videos"
 DB_NAME = "crowd_shield.db"
+MESSENGER_API_URL = "http://localhost:8003/send-message"
+NOTIFY_PHONE_NUMBERS = os.getenv("NOTIFY_PHONE_NUMBERS", "").split(",")
 
 # Ensure upload directory exists
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -92,11 +98,27 @@ async def upload_video(
                 "session_id": session_id,
                 "notify_to": recipient,
                 "status": "pending",
-                "description": description
+                "description": description,
+                "live_url": "http://localhost:8000"
             })
             
         conn.commit()
         conn.close()
+        
+        # Send WhatsApp notifications
+        for phone in NOTIFY_PHONE_NUMBERS:
+            phone = phone.strip()
+            if phone:
+                try:
+                    session_url = f"http://localhost:3000/session/{created_sessions[0]['session_id']}"
+                    message_text = f"🚨 Crowd Shield Alert!\n\nDescription: {description}\nStatus: Pending Review\n\nView Live Feed & Details:\n{session_url}"
+                    requests.post(MESSENGER_API_URL, json={
+                        "phone_no": phone,
+                        "message": message_text
+                    })
+                    print(f"Notification sent to {phone}")
+                except Exception as e:
+                    print(f"Failed to send notification to {phone}: {e}")
         
         return created_sessions
 
@@ -148,7 +170,7 @@ async def get_session(session_id: str):
     
     if not row:
         raise HTTPException(status_code=404, detail="Session not found")
-    live_url = "http:localhost:8000"
+    live_url = "http://localhost:8000"
     response = dict(row)
     response['live_url'] = live_url
     return response
