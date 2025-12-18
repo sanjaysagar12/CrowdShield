@@ -111,7 +111,7 @@ async def upload_video(
             if phone:
                 try:
                     session_url = f"http://localhost:3000/session/{created_sessions[0]['session_id']}"
-                    message_text = f"🚨 Crowd Shield Alert!\n\nDescription: {description}\nStatus: Pending Review\n\nView Live Feed & Details:\n{session_url}"
+                    message_text = f"🚨 Crowd Shield Alert!\n{session_url}"
                     requests.post(MESSENGER_API_URL, json={
                         "phone_no": phone,
                         "message": message_text

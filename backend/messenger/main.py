@@ -5,6 +5,7 @@ from playwright.async_api import async_playwright
 from contextlib import asynccontextmanager
 import asyncio
 import os
+import urllib.parse
 
 import uvicorn
 
@@ -238,9 +239,10 @@ async def send_whatsapp_message(request: MessageRequest):
     
     phone = request.phone_no.lstrip("+")
     message = request.message
+    encoded_message = urllib.parse.quote(message)
     
     try:
-        url = f"https://web.whatsapp.com/send?phone={phone}&text={message}"
+        url = f"https://web.whatsapp.com/send?phone={phone}&text={encoded_message}"
         await page.goto(url, wait_until="load", timeout=60000)
         await asyncio.sleep(8)
         
