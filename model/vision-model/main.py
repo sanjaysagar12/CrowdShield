@@ -2,6 +2,7 @@ import argparse
 import os
 import sys
 import time
+import requests
 from collections import deque
 from pathlib import Path
 
@@ -151,6 +152,20 @@ def main():
 				for f in frame_buffer:
 					writer.write(f)
 				writer.release()
+				
+				# Send the video clip to the agent
+				try:
+					print(f"Sending {out_path.name} to agent...")
+					with open(out_path, 'rb') as f:
+						files = {'file': (out_path.name, f, 'video/mp4')}
+						response = requests.post('http://localhost:8001/agent', files=files)
+						if response.status_code == 200:
+							print("Successfully sent video to agent.")
+						else:
+							print(f"Failed to send video to agent. Status: {response.status_code}")
+				except Exception as e:
+					print(f"Error sending video to agent: {e}")
+
 				clip_count += 1
 				last_presence = False
 
