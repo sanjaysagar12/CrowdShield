@@ -51,7 +51,7 @@ def process_video_with_gemini(video_path: Path):
 
     try:
         print("Sending frame to Gemini...")
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content([
             "Is there a person in this image? Answer with just YES or NO.",
             pil_image
