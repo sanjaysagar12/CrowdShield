@@ -8,6 +8,7 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 from PIL import Image
 import io
+import requests
 
 load_dotenv()
 
@@ -66,8 +67,29 @@ def process_video_with_gemini(video_path: Path):
         print(f"Gemini error: {e}")
         return False
 
-def handle_person_not_present():
-    print("not present")
+def handle_person_not_present(video_path: Path):
+    """
+    Sends the video to the Crowd Shield API to create a session.
+    """
+    print("Person not present. Sending to Crowd Shield API...")
+    crowd_shield_url = "http://localhost:8002/upload"
+    
+    try:
+        with open(video_path, 'rb') as f:
+            files = {'file': (video_path.name, f, 'video/mp4')}
+            data = {
+                'description': 'Security Alert: No person detected in monitored area.',
+                'notify_to': 'admin,security'
+            }
+            response = requests.post(crowd_shield_url, files=files, data=data)
+            
+            if response.status_code == 200:
+                print(f"Successfully created session: {response.json()}")
+            else:
+                print(f"Failed to create session. Status: {response.status_code}, Response: {response.text}")
+                
+    except Exception as e:
+        print(f"Error sending to Crowd Shield API: {e}")
 
 @app.post("/agent")
 async def agent_endpoint(file: UploadFile = File(...)):
@@ -82,7 +104,7 @@ async def agent_endpoint(file: UploadFile = File(...)):
         is_person_present = process_video_with_gemini(file_path)
         
         if not is_person_present:
-            handle_person_not_present()
+            handle_person_not_present(file_path)
         else:
             print("Person detected by Gemini.")
         
