@@ -7,6 +7,8 @@ import threading
 import time
 import asyncio
 from typing import Dict
+from fastapi import FastAPI, Request, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect
+from websockets import connect
 
 app = FastAPI(title="Live Stream Hub")
 
@@ -25,8 +27,29 @@ streams: Dict[str, bytes] = {}
 # Lock for thread safety when accessing streams
 stream_lock = threading.Lock()
 
-@app.post("/push/{camera_id}")
-async def push_frame(camera_id: str, file: UploadFile = File(...)):
+@app.websocket("/ws/push/{camera_id}")
+async def websocket_endpoint(websocket: WebSocket, camera_id: str):
+    await websocket.accept()
+    try:
+        while True:
+            data = await websocket.receive_bytes()
+            with stream_lock:
+                streams[camera_id] = data
+    except WebSocketDisconnect:
+        print(f"Camera {camera_id} disconnected")
+    except Exception as e:
+        print(f"Error in websocket {camera_id}: {e}")
+    finally:
+        with stream_lock:
+            if camera_id in streams:
+                del streams[camera_id]
+
+@app.get("/active_cameras")
+async def get_active_cameras():
+    """Returns a list of currently active camera IDs."""
+    with stream_lock:
+        return {"cameras": list(streams.keys())}
+
     """
     Receive a frame from a vision model and update the stream.
     """

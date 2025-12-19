@@ -83,126 +83,163 @@ def main():
 	print(f"Streaming to: {args.stream_url}")
 	print(f"Camera ID: {args.camera_id}, Location: {args.lat}, {args.long}")
 
-	last_presence = True
-	clip_count = 0
+	# Parse stream URL to get websocket URL if needed, or assume argument provided is correct base
+	# If args.stream_url is http, convert to ws for the websocket connection
+	ws_url = args.stream_url.replace("http://", "ws://").replace("https://", "wss://")
+	if "/push/" in ws_url and "/ws/" not in ws_url:
+             ws_url = ws_url.replace("/push/", "/ws/push/")
+	
+	print(f"WebSocket URL: {ws_url}")
 
+	import asyncio
 	try:
-		while True:
-			ret, frame = cap.read()
-			if not ret:
-				print("Webcam frame read failed, exiting")
-				break
+		import websockets
+	except ImportError:
+		print("Missing dependency: websockets. Install with: pip install websockets")
+		sys.exit(1)
 
-			frame_buffer.append(frame.copy())
-
-			# Run detection on this frame
-			try:
-				results = model(frame, conf=args.conf, device=args.device or None)
-				res = results[0]
+	async def run_loop():
+		last_presence = True
+		clip_count = 0
+		
+		# Connect to WebSocket
+		try:
+			async with websockets.connect(ws_url) as websocket:
+				print("Connected to WebSocket server")
 				
-				# Annotate frame
-				annotated_frame = res.plot()
-				
-				# Push frame to stream server
-				try:
-					ret, buffer = cv2.imencode('.jpg', annotated_frame)
-					if ret:
-						files = {'file': ('frame.jpg', buffer.tobytes(), 'image/jpeg')}
-						# Use a session or simple post. Timeout is crucial to avoid blocking.
-						try:
-							requests.post(args.stream_url, files=files, timeout=0.1)
-						except requests.exceptions.RequestException:
-							pass # Ignore errors to keep stream live
-				except Exception as e:
-					print(f"Streaming error: {e}")
+				while True:
+					ret, frame = cap.read()
+					if not ret:
+						print("Webcam frame read failed, exiting")
+						break
 
-			except Exception as e:
-				# If model call fails, skip this frame
-				print(f"Model inference error: {e}")
-				time.sleep(0.01)
-				continue
+					frame_buffer.append(frame.copy())
 
-			# Determine if any 'person' detected
-			presence = False
-			try:
-				if hasattr(res, 'boxes') and res.boxes is not None:
-					# Attempt to read class indices from boxes
-					cls = None
+					# Run detection
 					try:
-						cls = res.boxes.cls
-					except Exception:
+						results = model(frame, conf=args.conf, device=args.device or None)
+						res = results[0]
+						annotated_frame = res.plot()
+						
+						# Push frame via WebSocket
 						try:
-							# fallback: boxes.data columns [x1,y1,x2,y2,conf,class]
-							data = res.boxes.data
-							if data is not None:
-								cls = data[:, 5]
-						except Exception:
+							ret, buffer = cv2.imencode('.jpg', annotated_frame)
+							if ret:
+								await websocket.send(buffer.tobytes())
+						except Exception as e:
+							print(f"WS Send error: {e}")
+							# Break to trigger reconnect logic if critical, or just pass
+							# For now, let's try to ignore single frame errors but if socket closed it will raise
+
+					except Exception as e:
+						print(f"Inference/Send error: {e}")
+						# Allow loop to continue (maybe model error), but sleep a bit
+						await asyncio.sleep(0.01)
+
+					# Presence logic
+					presence = False
+					try:
+						if hasattr(res, 'boxes') and res.boxes is not None:
 							cls = None
-
-					if cls is not None:
-						# convert to python iterable
-						try:
-							arr = cls.cpu().numpy()
-						except Exception:
 							try:
-								arr = cls.numpy()
+								cls = res.boxes.cls
 							except Exception:
-								arr = list(cls)
-
-						for c in arr:
-							if person_class is not None:
-								if int(c) == int(person_class):
-									presence = True
-									break
-							else:
-								# if we don't know class index, try matching by name using model.names
 								try:
-									if int(c) < len(model.names) and str(model.names[int(c)]).lower() == 'person':
-										presence = True
-										break
+									data = res.boxes.data
+									if data is not None:
+										cls = data[:, 5]
 								except Exception:
-									pass
-			except Exception:
-				presence = False
+									cls = None
 
-			# Trigger: when presence goes from True -> False and buffer is full
-			if not presence and last_presence and len(frame_buffer) == buffer_size:
-				timestamp = time.strftime('%Y%m%d_%H%M%S')
-				out_path = save_dir / f"clip_no_person_{timestamp}_{clip_count}.mp4"
-				fourcc = cv2.VideoWriter_fourcc(*'avc1')
-				writer = cv2.VideoWriter(str(out_path), fourcc, fps, (width, height))
-				print(f"No person detected — saving {args.buffer_seconds}s clip to {out_path}")
-				for f in frame_buffer:
-					writer.write(f)
-				writer.release()
+							if cls is not None:
+								try:
+									arr = cls.cpu().numpy()
+								except Exception:
+									try:
+										arr = cls.numpy()
+									except Exception:
+										arr = list(cls)
+
+								for c in arr:
+									if person_class is not None:
+										if int(c) == int(person_class):
+											presence = True
+											break
+									else:
+										try:
+											if int(c) < len(model.names) and str(model.names[int(c)]).lower() == 'person':
+												presence = True
+												break
+										except Exception:
+											pass
+					except Exception:
+						presence = False
+
+					# Recording logic
+					if not presence and last_presence and len(frame_buffer) == buffer_size:
+						timestamp = time.strftime('%Y%m%d_%H%M%S')
+						out_path = save_dir / f"clip_no_person_{timestamp}_{clip_count}.mp4"
+						fourcc = cv2.VideoWriter_fourcc(*'avc1')
+						writer = cv2.VideoWriter(str(out_path), fourcc, fps, (width, height))
+						print(f"No person detected — saving {args.buffer_seconds}s clip to {out_path}")
+						for f in frame_buffer:
+							writer.write(f)
+						writer.release()
+						
+						
+						# Upload to agent in a separate thread
+						def upload_worker(path, cam_id, lat, long):
+							try:
+								print(f"Sending {path.name} to agent...")
+								with open(path, 'rb') as f:
+									files = {'file': (path.name, f, 'video/mp4')}
+									data_payload = {
+										'camera_id': cam_id,
+										'latitude': lat,
+										'longitude': long
+									}
+									response = requests.post('http://localhost:8001/agent', files=files, data=data_payload)
+									if response.status_code == 200:
+										print(f"Successfully sent {path.name} to agent.")
+									else:
+										print(f"Failed sent {path.name}. Status: {response.status_code}")
+							except Exception as e:
+								print(f"Error sending to agent: {e}")
+
+						import threading
+						upload_thread = threading.Thread(
+							target=upload_worker, 
+							args=(out_path, args.camera_id, args.lat, args.long)
+						)
+						upload_thread.start()
+
+						clip_count += 1
+						last_presence = False
+
+					if presence:
+						last_presence = True
+
+					await asyncio.sleep(0.001)
+
+		except (websockets.exceptions.ConnectionClosedError, ConnectionRefusedError) as e:
+			print(f"WebSocket connection failed/closed: {e}. Retrying in 5s...")
+			await asyncio.sleep(5)
+			# Recursive retry or loop
+			# Simple way: just return and let main loop handle it if we structured it that way
+			# Ideally we want a while True loop around the connection
+			raise e
+
+	# Main execution wrapper
+	async def main_async():
+		while True:
+			try:
+				await run_loop()
+			except Exception as e:
+				print(f"Restarting loop due to: {e}")
+				await asyncio.sleep(5)
 				
-				# Send the video clip to the agent
-				try:
-					print(f"Sending {out_path.name} to agent...")
-					with open(out_path, 'rb') as f:
-						files = {'file': (out_path.name, f, 'video/mp4')}
-						data_payload = {
-							'camera_id': args.camera_id,
-							'latitude': args.lat,
-							'longitude': args.long
-						}
-						response = requests.post('http://localhost:8001/agent', files=files, data=data_payload)
-						if response.status_code == 200:
-							print("Successfully sent video and metadata to agent.")
-						else:
-							print(f"Failed to send to agent. Status: {response.status_code}, Resp: {response.text}")
-				except Exception as e:
-					print(f"Error sending video to agent: {e}")
-
-				clip_count += 1
-				last_presence = False
-
-			if presence:
-				last_presence = True
-
-			# Small sleep to avoid tight loop; inference determines effective rate
-			time.sleep(0.001)
-
+	try:
+		asyncio.run(main_async())
 	finally:
 		cap.release()
 
