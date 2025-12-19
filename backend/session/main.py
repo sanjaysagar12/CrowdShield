@@ -4,6 +4,7 @@ import os
 import shutil
 from typing import List
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,6 +23,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount video directory to serve static files
+app.mount("/videos", StaticFiles(directory="uploaded_videos"), name="videos")
 
 # Configuration
 UPLOAD_DIR = "uploaded_videos"
@@ -57,7 +61,9 @@ class SessionResponse(BaseModel):
     notify_to: str
     status: str
     description: str
+
     live_url: str
+    video_url: str
 
 class StatusUpdate(BaseModel):
     status: str  # 'approved' or 'rejected'
@@ -99,7 +105,9 @@ async def upload_video(
                 "notify_to": recipient,
                 "status": "pending",
                 "description": description,
-                "live_url": "http://localhost:8000"
+                "description": description,
+                "live_url": "http://localhost:8000",
+                "video_url": f"http://localhost:8002/videos/{video_filename}"
             })
             
         conn.commit()
@@ -164,15 +172,23 @@ async def get_session(session_id: str):
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
-    cursor.execute("SELECT session_id, notify_to, status, description FROM sessions WHERE session_id = ?", (session_id,))
+    cursor.execute("SELECT session_id, notify_to, status, description, video_path FROM sessions WHERE session_id = ?", (session_id,))
     row = cursor.fetchone()
     conn.close()
     
     if not row:
         raise HTTPException(status_code=404, detail="Session not found")
+    
     live_url = "http://localhost:8000"
     response = dict(row)
     response['live_url'] = live_url
+    
+    if response.get('video_path'):
+         filename = os.path.basename(response['video_path'])
+         response['video_url'] = f"http://localhost:8002/videos/{filename}"
+    else:
+         response['video_url'] = ""
+
     return response
 
 @app.get("/sessions", response_model=List[SessionResponse])
@@ -181,11 +197,22 @@ async def list_sessions():
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("SELECT session_id, notify_to, status, description FROM sessions")
+    cursor.execute("SELECT session_id, notify_to, status, description, video_path FROM sessions")
     rows = cursor.fetchall()
     conn.close()
     
-    return [dict(row) for row in rows]
+    results = []
+    for row in rows:
+        d = dict(row)
+        d['live_url'] = "http://localhost:8000"
+        if d.get('video_path'):
+            filename = os.path.basename(d['video_path'])
+            d['video_url'] = f"http://localhost:8002/videos/{filename}"
+        else:
+             d['video_url'] = ""
+        results.append(d)
+
+    return results
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8002)

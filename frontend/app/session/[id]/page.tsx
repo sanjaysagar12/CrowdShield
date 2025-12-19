@@ -9,6 +9,7 @@ interface Session {
   status: string;
   description: string;
   live_url: string;
+  video_url: string;
 }
 
 export default function SessionPage() {
@@ -68,7 +69,7 @@ export default function SessionPage() {
         {/* Header Section */}
         <div className="bg-white rounded-lg shadow-md p-6">
           <h1 className="text-3xl font-bold text-gray-800 mb-4">Crowd Shield Session</h1>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <p className="text-sm text-gray-500">Session ID</p>
@@ -76,11 +77,10 @@ export default function SessionPage() {
             </div>
             <div>
               <p className="text-sm text-gray-500">Status</p>
-              <span className={`inline-block px-3 py-1 rounded-full text-sm font-semibold ${
-                session.status === 'approved' ? 'bg-green-100 text-green-800' :
-                session.status === 'rejected' ? 'bg-red-100 text-red-800' :
-                'bg-yellow-100 text-yellow-800'
-              }`}>
+              <span className={`inline-block px-3 py-1 rounded-full text-sm font-semibold ${session.status === 'approved' ? 'bg-green-100 text-green-800' :
+                  session.status === 'rejected' ? 'bg-red-100 text-red-800' :
+                    'bg-yellow-100 text-yellow-800'
+                }`}>
                 {session.status.toUpperCase()}
               </span>
             </div>
@@ -110,6 +110,28 @@ export default function SessionPage() {
             <p>Live feed source: {session.live_url}</p>
           </div>
         </div>
+
+        {/* Recorded Video Section */}
+        {session.video_url && (
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <h2 className="text-xl font-bold text-gray-800 mb-4">Recorded Incident Video</h2>
+            <div className="aspect-video w-full bg-black rounded-lg overflow-hidden relative">
+              <video
+                src={session.video_url}
+                controls
+                className="w-full h-full"
+              >
+                Your browser does not support the video tag.
+              </video>
+            </div>
+            <div className="mt-4 text-sm text-gray-500">
+              <p>Video source: {session.video_url}</p>
+              <a href={session.video_url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
+                Download / Open directly
+              </a>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

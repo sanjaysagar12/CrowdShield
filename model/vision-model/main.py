@@ -146,7 +146,7 @@ def main():
 			if not presence and last_presence and len(frame_buffer) == buffer_size:
 				timestamp = time.strftime('%Y%m%d_%H%M%S')
 				out_path = save_dir / f"clip_no_person_{timestamp}_{clip_count}.mp4"
-				fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+				fourcc = cv2.VideoWriter_fourcc(*'avc1')
 				writer = cv2.VideoWriter(str(out_path), fourcc, fps, (width, height))
 				print(f"No person detected — saving {args.buffer_seconds}s clip to {out_path}")
 				for f in frame_buffer:
