@@ -1,82 +1,91 @@
 import cv2
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, UploadFile, File, HTTPException
 from fastapi.responses import StreamingResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 import threading
+import time
+import asyncio
+from typing import Dict
 
-app = FastAPI(title="Live Stream API")
+app = FastAPI(title="Live Stream Hub")
 
-# Allow all origins (for iframe embedding on other sites)
+# Allow all origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods
-    allow_headers=["*"],  # Allows all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# Global variable to control camera access
-camera = None
+# Store the latest frame for each camera
+# Format: {camera_id: b'jpeg_bytes'}
+streams: Dict[str, bytes] = {}
+# Lock for thread safety when accessing streams
+stream_lock = threading.Lock()
 
-def get_camera():
-    global camera
-    if camera is None:
-        camera = cv2.VideoCapture(0)
-    return camera
+@app.post("/push/{camera_id}")
+async def push_frame(camera_id: str, file: UploadFile = File(...)):
+    """
+    Receive a frame from a vision model and update the stream.
+    """
+    try:
+        contents = await file.read()
+        with stream_lock:
+            streams[camera_id] = contents
+        return {"status": "ok", "camera_id": camera_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-def generate_frames():
-    cam = get_camera()
+def generate_frames(camera_id: str):
+    """
+    Generator that yields frames for a specific camera.
+    """
     while True:
-        success, frame = cam.read()
-        if not success:
-            break
-        else:
-            # Encode the frame in JPEG format
-            ret, buffer = cv2.imencode('.jpg', frame)
-            frame = buffer.tobytes()
-            
-            # Yield the frame in byte format
+        with stream_lock:
+            frame_data = streams.get(camera_id)
+        
+        if frame_data:
             yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_data + b'\r\n')
+        else:
+            # Check if we have any frame at all, if not, maybe yield a placeholder or wait
+            # For now, just wait a bit to avoid busy loop if no stream
+            pass
+            
+        time.sleep(0.033) # Approx 30 FPS
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
     return """
     <html>
         <head>
-            <title>Live Stream</title>
+            <title>Live Stream Hub</title>
             <style>
                 body { font-family: sans-serif; text-align: center; padding: 20px; }
                 .container { max-width: 800px; margin: 0 auto; }
+                .camera-box { margin-bottom: 30px; border: 1px solid #ccc; padding: 10px; border-radius: 8px; }
                 img { max-width: 100%; border: 2px solid #333; }
-                .embed-code { background: #f0f0f0; padding: 10px; margin-top: 20px; border-radius: 5px; }
             </style>
         </head>
         <body>
             <div class="container">
-                <h1>Live Camera Stream</h1>
-                <img src="/video_feed" />
+                <h1>Live Stream Hub</h1>
+                <p>Access streams at <code>/video_feed/{camera_id}</code></p>
                 
-                <div class="embed-code">
-                    <h3>Embed this stream:</h3>
-                    <code>&lt;iframe src="YOUR_PUBLIC_URL/video_feed" width="640" height="480"&gt;&lt;/iframe&gt;</code>
-                    <p><small>Replace YOUR_PUBLIC_URL with this server's IP address or domain.</small></p>
+                <div class="camera-box">
+                    <h3>Camera 1 (cam1)</h3>
+                    <img src="/video_feed/cam1" alt="Waiting for stream..." />
                 </div>
             </div>
         </body>
     </html>
     """
 
-@app.get("/video_feed")
-async def video_feed():
-    return StreamingResponse(generate_frames(), media_type="multipart/x-mixed-replace; boundary=frame")
-
-@app.on_event("shutdown")
-def shutdown_event():
-    global camera
-    if camera is not None:
-        camera.release()
+@app.get("/video_feed/{camera_id}")
+async def video_feed(camera_id: str):
+    return StreamingResponse(generate_frames(camera_id), media_type="multipart/x-mixed-replace; boundary=frame")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

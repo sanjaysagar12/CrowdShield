@@ -13,6 +13,7 @@ def main():
 	parser.add_argument("--device", default=None, help="Device to run on, e.g. 'cpu' or '0' (default: autoselect)")
 	parser.add_argument("--save-dir", default="recordings", help="Directory to save recorded clips")
 	parser.add_argument("--buffer-seconds", type=float, default=10.0, help="Seconds to buffer for each clip (default: 10)")
+	parser.add_argument("--stream-url", default="http://localhost:8000/push/cam1", help="URL to push frames to (default: .../push/cam1)")
 	args = parser.parse_args()
 
 	model_path = Path(args.model)
@@ -76,6 +77,7 @@ def main():
 
 	print(f"Webcam opened {width}x{height} @ {fps} FPS, buffering {args.buffer_seconds}s ({buffer_size} frames).")
 	print(f"Saving clips to: {save_dir}")
+	print(f"Streaming to: {args.stream_url}")
 
 	last_presence = True
 	clip_count = 0
@@ -93,6 +95,23 @@ def main():
 			try:
 				results = model(frame, conf=args.conf, device=args.device or None)
 				res = results[0]
+				
+				# Annotate frame
+				annotated_frame = res.plot()
+				
+				# Push frame to stream server
+				try:
+					ret, buffer = cv2.imencode('.jpg', annotated_frame)
+					if ret:
+						files = {'file': ('frame.jpg', buffer.tobytes(), 'image/jpeg')}
+						# Use a session or simple post. Timeout is crucial to avoid blocking.
+						try:
+							requests.post(args.stream_url, files=files, timeout=0.1)
+						except requests.exceptions.RequestException:
+							pass # Ignore errors to keep stream live
+				except Exception as e:
+					print(f"Streaming error: {e}")
+
 			except Exception as e:
 				# If model call fails, skip this frame
 				print(f"Model inference error: {e}")
