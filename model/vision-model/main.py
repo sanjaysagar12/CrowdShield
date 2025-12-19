@@ -14,6 +14,9 @@ def main():
 	parser.add_argument("--save-dir", default="recordings", help="Directory to save recorded clips")
 	parser.add_argument("--buffer-seconds", type=float, default=10.0, help="Seconds to buffer for each clip (default: 10)")
 	parser.add_argument("--stream-url", default="http://localhost:8000/push/cam1", help="URL to push frames to (default: .../push/cam1)")
+	parser.add_argument("--camera-id", default="cam1", help="Camera ID (default: cam1)")
+	parser.add_argument("--lat", type=str, default="0.0", help="Latitude (default: 0.0)")
+	parser.add_argument("--long", type=str, default="0.0", help="Longitude (default: 0.0)")
 	args = parser.parse_args()
 
 	model_path = Path(args.model)
@@ -78,6 +81,7 @@ def main():
 	print(f"Webcam opened {width}x{height} @ {fps} FPS, buffering {args.buffer_seconds}s ({buffer_size} frames).")
 	print(f"Saving clips to: {save_dir}")
 	print(f"Streaming to: {args.stream_url}")
+	print(f"Camera ID: {args.camera_id}, Location: {args.lat}, {args.long}")
 
 	last_presence = True
 	clip_count = 0
@@ -177,11 +181,16 @@ def main():
 					print(f"Sending {out_path.name} to agent...")
 					with open(out_path, 'rb') as f:
 						files = {'file': (out_path.name, f, 'video/mp4')}
-						response = requests.post('http://localhost:8001/agent', files=files)
+						data_payload = {
+							'camera_id': args.camera_id,
+							'latitude': args.lat,
+							'longitude': args.long
+						}
+						response = requests.post('http://localhost:8001/agent', files=files, data=data_payload)
 						if response.status_code == 200:
-							print("Successfully sent video to agent.")
+							print("Successfully sent video and metadata to agent.")
 						else:
-							print(f"Failed to send video to agent. Status: {response.status_code}")
+							print(f"Failed to send to agent. Status: {response.status_code}, Resp: {response.text}")
 				except Exception as e:
 					print(f"Error sending video to agent: {e}")
 

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 import uvicorn
 import shutil
 from pathlib import Path
@@ -67,7 +67,7 @@ def process_video_with_gemini(video_path: Path):
         print(f"Gemini error: {e}")
         return False
 
-def handle_person_not_present(video_path: Path):
+def handle_person_not_present(video_path: Path, camera_id: str, latitude: str, longitude: str):
     """
     Sends the video to the Crowd Shield API to create a session.
     """
@@ -79,7 +79,10 @@ def handle_person_not_present(video_path: Path):
             files = {'file': (video_path.name, f, 'video/mp4')}
             data = {
                 'description': 'Security Alert: No person detected in monitored area.',
-                'notify_to': 'admin,security'
+                'notify_to': 'admin,security',
+                'camera_id': camera_id,
+                'latitude': latitude,
+                'longitude': longitude
             }
             response = requests.post(crowd_shield_url, files=files, data=data)
             
@@ -92,19 +95,24 @@ def handle_person_not_present(video_path: Path):
         print(f"Error sending to Crowd Shield API: {e}")
 
 @app.post("/agent")
-async def agent_endpoint(file: UploadFile = File(...)):
+async def agent_endpoint(
+    file: UploadFile = File(...),
+    camera_id: str = Form("cam1"),
+    latitude: str = Form("0.0"),
+    longitude: str = Form("0.0")
+):
     try:
         file_path = UPLOAD_DIR / file.filename
         with file_path.open("wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         
-        print(f"Received video: {file.filename}")
+        print(f"Received video: {file.filename} from {camera_id} at {latitude},{longitude}")
         
         # Analyze video with Gemini
         is_person_present = process_video_with_gemini(file_path)
         
         if not is_person_present:
-            handle_person_not_present(file_path)
+            handle_person_not_present(file_path, camera_id, latitude, longitude)
         else:
             print("Person detected by Gemini.")
         

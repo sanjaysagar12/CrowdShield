@@ -50,6 +50,24 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    
+    # Check if new columns exist, if not add them (Migration)
+    # This is a simple migration strategy for this dev environment
+    try:
+        cursor.execute("ALTER TABLE sessions ADD COLUMN camera_id TEXT")
+    except sqlite3.OperationalError:
+        pass # Column likely exists
+        
+    try:
+        cursor.execute("ALTER TABLE sessions ADD COLUMN latitude TEXT")
+    except sqlite3.OperationalError:
+        pass
+        
+    try:
+        cursor.execute("ALTER TABLE sessions ADD COLUMN longitude TEXT")
+    except sqlite3.OperationalError:
+        pass
+
     conn.commit()
     conn.close()
 
@@ -64,6 +82,9 @@ class SessionResponse(BaseModel):
 
     live_url: str
     video_url: str
+    camera_id: str
+    latitude: str
+    longitude: str
 
 class StatusUpdate(BaseModel):
     status: str  # 'approved' or 'rejected'
@@ -72,7 +93,10 @@ class StatusUpdate(BaseModel):
 async def upload_video(
     file: UploadFile = File(...),
     description: str = Form(...),
-    notify_to: str = Form(...)  # Comma-separated list of recipients
+    notify_to: str = Form(...),  # Comma-separated list of recipients
+    camera_id: str = Form("cam1"),
+    latitude: str = Form("0.0"),
+    longitude: str = Form("0.0")
 ):
     """
     Upload a video and create a session for each recipient in the notify_to list.
@@ -97,8 +121,8 @@ async def upload_video(
         for recipient in recipients:
             session_id = str(uuid.uuid4())
             cursor.execute(
-                "INSERT INTO sessions (session_id, video_path, description, notify_to, status) VALUES (?, ?, ?, ?, ?)",
-                (session_id, video_path, description, recipient, "pending")
+                "INSERT INTO sessions (session_id, video_path, description, notify_to, status, camera_id, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (session_id, video_path, description, recipient, "pending", camera_id, latitude, longitude)
             )
             created_sessions.append({
                 "session_id": session_id,
@@ -106,8 +130,11 @@ async def upload_video(
                 "status": "pending",
                 "description": description,
                 "description": description,
-                "live_url": "http://localhost:8000",
-                "video_url": f"http://localhost:8002/videos/{video_filename}"
+                "live_url": f"http://localhost:8000/video_feed/{camera_id}",
+                "video_url": f"http://localhost:8002/videos/{video_filename}",
+                "camera_id": camera_id,
+                "latitude": latitude,
+                "longitude": longitude
             })
             
         conn.commit()
@@ -172,16 +199,20 @@ async def get_session(session_id: str):
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
-    cursor.execute("SELECT session_id, notify_to, status, description, video_path FROM sessions WHERE session_id = ?", (session_id,))
+    cursor.execute("SELECT session_id, notify_to, status, description, video_path, camera_id, latitude, longitude FROM sessions WHERE session_id = ?", (session_id,))
     row = cursor.fetchone()
     conn.close()
     
     if not row:
         raise HTTPException(status_code=404, detail="Session not found")
     
-    live_url = "http://localhost:8000"
     response = dict(row)
-    response['live_url'] = live_url
+    # Ensure backward compatibility if columns were NULL
+    cam_id = response.get('camera_id') or "cam1"
+    response['live_url'] = f"http://localhost:8000/video_feed/{cam_id}"
+    response['camera_id'] = cam_id
+    response['latitude'] = response.get('latitude') or "0.0"
+    response['longitude'] = response.get('longitude') or "0.0"
     
     if response.get('video_path'):
          filename = os.path.basename(response['video_path'])
@@ -197,14 +228,16 @@ async def list_sessions():
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("SELECT session_id, notify_to, status, description, video_path FROM sessions")
+    cursor.execute("SELECT session_id, notify_to, status, description, video_path, camera_id, latitude, longitude FROM sessions")
     rows = cursor.fetchall()
     conn.close()
     
     results = []
     for row in rows:
         d = dict(row)
-        d['live_url'] = "http://localhost:8000"
+        cam_id = d.get('camera_id') or "cam1"
+        d['live_url'] = f"http://localhost:8000/video_feed/{cam_id}"
+        pass # video_url logic follows
         if d.get('video_path'):
             filename = os.path.basename(d['video_path'])
             d['video_url'] = f"http://localhost:8002/videos/{filename}"

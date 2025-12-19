@@ -10,6 +10,9 @@ interface Session {
   description: string;
   live_url: string;
   video_url: string;
+  camera_id: string;
+  latitude: string;
+  longitude: string;
 }
 
 export default function SessionPage() {
@@ -84,6 +87,24 @@ export default function SessionPage() {
                 {session.status.toUpperCase()}
               </span>
             </div>
+            <div>
+              <p className="text-sm text-gray-500">Camera Source</p>
+              <p className="font-mono text-sm text-blue-600">{session.camera_id}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Location</p>
+              <p className="font-mono text-sm" title={`${session.latitude}, ${session.longitude}`}>
+                {session.latitude}, {session.longitude}
+                <a
+                  href={`https://www.google.com/maps/search/?api=1&query=${session.latitude},${session.longitude}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="ml-2 text-xs text-blue-500 hover:underline"
+                >
+                  (View Map)
+                </a>
+              </p>
+            </div>
             <div className="md:col-span-2">
               <p className="text-sm text-gray-500">Description</p>
               <p className="text-gray-800">{session.description}</p>
@@ -97,7 +118,7 @@ export default function SessionPage() {
 
         {/* Live Stream Section */}
         <div className="bg-white rounded-lg shadow-md p-6">
-          <h2 className="text-xl font-bold text-gray-800 mb-4">Live Surveillance Feed</h2>
+          <h2 className="text-xl font-bold text-gray-800 mb-4">Live Surveillance Feed ({session.camera_id})</h2>
           <div className="aspect-video w-full bg-black rounded-lg overflow-hidden relative">
             <iframe
               src={session.live_url}
