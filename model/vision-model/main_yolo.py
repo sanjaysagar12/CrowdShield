@@ -1,5 +1,4 @@
 import argparse
-import os
 import sys
 import time
 import requests
@@ -7,7 +6,7 @@ from collections import deque
 from pathlib import Path
 
 def main():
-	parser = argparse.ArgumentParser(description="Webcam-only recorder: save 10s clip when NO person is detected")
+	parser = argparse.ArgumentParser(description="Webcam-only recorder: save 10s clip when NO person is detected (YOLO)")
 	parser.add_argument("--model", default="yolo11n.pt", help="Path to YOLO .pt model (default: yolo11n.pt)")
 	parser.add_argument("--conf", type=float, default=0.25, help="Confidence threshold for detections (default: 0.25)")
 	parser.add_argument("--device", default=None, help="Device to run on, e.g. 'cpu' or '0' (default: autoselect)")
@@ -36,12 +35,15 @@ def main():
 		print("Missing dependency: opencv-python. Install from requirements.txt or run: python -m pip install opencv-python")
 		raise
 
+	print(f"Loading YOLO model: {model_path}")
 	model = YOLO(str(model_path))
+	
 	save_dir = Path(args.save_dir)
 	save_dir.mkdir(parents=True, exist_ok=True)
 
 	# Open webcam
-	cap = cv2.VideoCapture(0)
+	# Use CAP_DSHOW to avoid MSMF errors on Windows
+	cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
 	if not cap.isOpened():
 		print("Failed to open webcam (device 0)")
 		sys.exit(1)
@@ -81,6 +83,7 @@ def main():
 	print(f"Webcam opened {width}x{height} @ {fps} FPS, buffering {args.buffer_seconds}s ({buffer_size} frames).")
 	print(f"Saving clips to: {save_dir}")
 	print(f"Streaming to: {args.stream_url}")
+	print(f"Mode: YOLO")
 	print(f"Camera ID: {args.camera_id}, Location: {args.lat}, {args.long}")
 
 	# Parse stream URL to get websocket URL if needed, or assume argument provided is correct base
@@ -117,28 +120,14 @@ def main():
 
 					# Run detection
 					try:
+						annotated_frame = frame.copy()
+						presence = False
+
 						results = model(frame, conf=args.conf, device=args.device or None)
 						res = results[0]
 						annotated_frame = res.plot()
 						
-						# Push frame via WebSocket
-						try:
-							ret, buffer = cv2.imencode('.jpg', annotated_frame)
-							if ret:
-								await websocket.send(buffer.tobytes())
-						except Exception as e:
-							print(f"WS Send error: {e}")
-							# Break to trigger reconnect logic if critical, or just pass
-							# For now, let's try to ignore single frame errors but if socket closed it will raise
-
-					except Exception as e:
-						print(f"Inference/Send error: {e}")
-						# Allow loop to continue (maybe model error), but sleep a bit
-						await asyncio.sleep(0.01)
-
-					# Presence logic
-					presence = False
-					try:
+						# YOLO Presence logic
 						if hasattr(res, 'boxes') and res.boxes is not None:
 							cls = None
 							try:
@@ -172,8 +161,21 @@ def main():
 												break
 										except Exception:
 											pass
-					except Exception:
-						presence = False
+						
+						# Push frame via WebSocket
+						try:
+							ret, buffer = cv2.imencode('.jpg', annotated_frame)
+							if ret:
+								await websocket.send(buffer.tobytes())
+						except Exception as e:
+							print(f"WS Send error: {e}")
+							# Break to trigger reconnect logic if critical, or just pass
+							# For now, let's try to ignore single frame errors but if socket closed it will raise
+
+					except Exception as e:
+						print(f"Inference/Send error: {e}")
+						# Allow loop to continue (maybe model error), but sleep a bit
+						await asyncio.sleep(0.01)
 
 					# Recording logic
 					if not presence and last_presence and len(frame_buffer) == buffer_size:
@@ -245,4 +247,3 @@ def main():
 
 if __name__ == "__main__":
 	main()
-

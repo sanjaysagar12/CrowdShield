@@ -1,3 +1,8 @@
-ultralytics>=8.0.0
+ultralytics
 opencv-python
 websockets
+tensorflow<2.11
+keras
+numpy
+Pillow
+h5py
