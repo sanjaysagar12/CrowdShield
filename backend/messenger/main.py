@@ -314,4 +314,5 @@ async def send_whatsapp_message(request: MessageRequest):
         raise HTTPException(status_code=500, detail=f"Failed to send message: {str(e)}")
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8003)
+    port = int(os.getenv("PORT", 8003))
+    uvicorn.run(app, host="0.0.0.0", port=port)

@@ -27,7 +27,10 @@ app.add_middleware(
 # Configuration
 UPLOAD_DIR = "uploaded_videos"
 DB_NAME = "crowd_shield.db"
-MESSENGER_API_URL = "http://localhost:8003/send-message"
+MESSENGER_API_URL = os.getenv("MESSENGER_API_URL", "http://localhost:8003/send-message")
+LIVESTREAM_SERVICE_URL = os.getenv("LIVESTREAM_SERVICE_URL", "http://localhost:8000")
+SELF_SERVICE_URL = os.getenv("SELF_SERVICE_URL", "http://localhost:8002")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 NOTIFY_PHONE_NUMBERS = os.getenv("NOTIFY_PHONE_NUMBERS", "").split(",")
 
 # Ensure upload directory exists
@@ -152,8 +155,8 @@ async def upload_video(
                     "notify_to": row_dict['notify_to'],
                     "status": row_dict['status'],
                     "description": row_dict['description'],
-                    "live_url": f"http://localhost:8000/video_feed/{cam_id}",
-                    "video_url": f"http://localhost:8002/videos/{vid_filename}" if vid_filename else "",
+                    "live_url": f"{LIVESTREAM_SERVICE_URL}/video_feed/{cam_id}",
+                    "video_url": f"{SELF_SERVICE_URL}/videos/{vid_filename}" if vid_filename else "",
                     "camera_id": cam_id,
                     "latitude": row_dict.get('latitude') or "0.0",
                     "longitude": row_dict.get('longitude') or "0.0",
@@ -183,8 +186,8 @@ async def upload_video(
                     "notify_to": recipient,
                     "status": "pending",
                     "description": description,
-                    "live_url": f"http://localhost:8000/video_feed/{camera_id}",
-                    "video_url": f"http://localhost:8002/videos/{video_filename}",
+                    "live_url": f"{LIVESTREAM_SERVICE_URL}/video_feed/{camera_id}",
+                    "video_url": f"{SELF_SERVICE_URL}/videos/{video_filename}",
                     "camera_id": camera_id,
                     "latitude": latitude,
                     "longitude": longitude,
@@ -200,7 +203,7 @@ async def upload_video(
                 phone = phone.strip()
                 if phone:
                     try:
-                        session_url = f"http://localhost:3000/session/{created_sessions[0]['session_id']}"
+                        session_url = f"{FRONTEND_URL}/session/{created_sessions[0]['session_id']}"
                         desc = created_sessions[0]['description']
                         message_text = f"🚨 {desc}\nSeverity: {severity}\nConfidence: {confidence}\n{session_url}"
                         requests.post(MESSENGER_API_URL, json={
@@ -270,8 +273,8 @@ async def get_session(session_id: str):
         "notify_to": row['notify_to'],
         "status": row['status'],
         "description": row['description'],
-        "live_url": f"http://localhost:8000/video_feed/{cam_id}",
-        "video_url": f"http://localhost:8002/videos/{vid_filename}" if vid_filename else "",
+        "live_url": f"{LIVESTREAM_SERVICE_URL}/video_feed/{cam_id}",
+        "video_url": f"{SELF_SERVICE_URL}/videos/{vid_filename}" if vid_filename else "",
         "camera_id": cam_id,
         "latitude": row['latitude'] or "0.0",
         "longitude": row['longitude'] or "0.0",
@@ -293,7 +296,7 @@ async def list_sessions():
     for row in rows:
         d = dict(row)
         cam_id = d.get('camera_id') or "cam1"
-        d['live_url'] = f"http://localhost:8000/video_feed/{cam_id}"
+        d['live_url'] = f"{LIVESTREAM_SERVICE_URL}/video_feed/{cam_id}"
         d['camera_id'] = cam_id
         d['latitude'] = d.get('latitude') or "0.0"
         d['longitude'] = d.get('longitude') or "0.0"
@@ -302,7 +305,7 @@ async def list_sessions():
         
         if d.get('video_path'):
             filename = os.path.basename(d['video_path'])
-            d['video_url'] = f"http://localhost:8002/videos/{filename}"
+            d['video_url'] = f"{SELF_SERVICE_URL}/videos/{filename}"
         else:
              d['video_url'] = ""
         results.append(d)

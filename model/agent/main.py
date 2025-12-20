@@ -102,7 +102,7 @@ def handle_event(video_path: Path, event_data: dict, camera_id: str, latitude: s
     confidence = event_data['confidence']
     
     print(f"{event_type} detected. Sending to Crowd Shield API...")
-    crowd_shield_url = "http://localhost:8002/upload"
+    crowd_shield_url = os.getenv("SESSION_API_URL", "http://localhost:8002/upload")
     
     description = f"Security Alert: {event_type} detected!"
     

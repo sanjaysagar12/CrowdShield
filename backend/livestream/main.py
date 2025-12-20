@@ -176,4 +176,5 @@ async def video_feed(camera_id: str, mode: str = "fight"):
     return StreamingResponse(generate_frames(camera_id, mode), media_type="multipart/x-mixed-replace; boundary=frame")
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)

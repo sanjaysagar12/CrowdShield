@@ -127,7 +127,8 @@ export default function SessionPage() {
     const fetchData = async () => {
       try {
         // Fetch all sessions for the top bar
-        const allRes = await fetch("http://localhost:8002/sessions");
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8002";
+        const allRes = await fetch(`${apiUrl}/sessions`);
         if (allRes.ok) {
           let allData: Session[] = await allRes.json();
           allData = allData.reverse(); // Newest first
@@ -139,7 +140,7 @@ export default function SessionPage() {
             setCurrentSession(found);
           } else {
             // Fallback fetch if not in list (unlikely if list is complete)
-            const singleRes = await fetch(`http://localhost:8002/session/${params.id}`);
+            const singleRes = await fetch(`${apiUrl}/session/${params.id}`);
             if (singleRes.ok) {
               setCurrentSession(await singleRes.json());
             } else {

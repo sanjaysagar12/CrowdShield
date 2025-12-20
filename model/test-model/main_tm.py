@@ -7,10 +7,14 @@ from collections import deque
 from pathlib import Path
 
 def main():
+	from dotenv import load_dotenv
+	import os
+	load_dotenv()
+
 	parser = argparse.ArgumentParser(description="Webcam-only recorder: save 10s clip when NO person is detected (Teachable Machine)")
 	parser.add_argument("--save-dir", default="recordings", help="Directory to save recorded clips")
 	parser.add_argument("--buffer-seconds", type=float, default=10.0, help="Seconds to buffer for each clip (default: 10)")
-	parser.add_argument("--stream-url", default="http://localhost:8000/push/cam1", help="URL to push frames to (default: .../push/cam1)")
+	parser.add_argument("--stream-url", default=os.getenv("LIVESTREAM_URL", "http://localhost:8000/push/cam1"), help="URL to push frames to (default: .../push/cam1)")
 	parser.add_argument("--camera-id", default="cam1", help="Camera ID (default: cam1)")
 	parser.add_argument("--lat", type=str, default="0.0", help="Latitude (default: 0.0)")
 	parser.add_argument("--long", type=str, default="0.0", help="Longitude (default: 0.0)")
@@ -208,7 +212,8 @@ def main():
 										'longitude': long
 									}
 									# Add timeout to prevent hanging
-									response = requests.post('http://localhost:8001/agent', files=files, data=data_payload, timeout=30)
+									agent_url = os.getenv("AGENT_API_URL", "http://localhost:8001/agent")
+									response = requests.post(agent_url, files=files, data=data_payload, timeout=30)
 									if response.status_code == 200:
 										print(f"Successfully sent {path.name} to agent.")
 									else:
