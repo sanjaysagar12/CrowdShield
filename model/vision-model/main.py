@@ -28,7 +28,7 @@ CAMERA_ID = "cam1"
 LIVESTREAM_URL = "ws://localhost:8000/ws/push/cam1"
 AGENT_URL = "http://localhost:8001/agent"
 BUFFER_SECONDS = 5
-FPS = 30
+FPS = 15
 LATITUDE = "0.0"
 LONGITUDE = "0.0"
 # Camera Index: 0 is usually the built-in webcam. 1 is often the OBS Virtual Camera if the webcam is present.
