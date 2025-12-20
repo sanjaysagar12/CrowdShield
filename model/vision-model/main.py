@@ -18,6 +18,7 @@ if current_dir not in sys.path:
 try:
     from fight_detection.model import FightDetector
     from fire_detection.model import FireDetector
+    from weapon_detection.model import WeaponDetector
 except ImportError as e:
     print(f"Import Error: {e}")
     print("Ensure you are running from 'model/vision-model/' or that the directories 'fight_detection' and 'fire_detection' are accessible.")
@@ -39,6 +40,7 @@ class VisionSystem:
         print("Initializing Vision System...")
         self.fight_detector = FightDetector()
         self.fire_detector = FireDetector()
+        self.weapon_detector = WeaponDetector()
         
         print(f"Opening Camera Index: {CAMERA_INDEX} (Targeting OBS Virtual Camera)")
         self.cap = cv2.VideoCapture(CAMERA_INDEX)
@@ -121,13 +123,15 @@ class VisionSystem:
                     
                     fight_detections = self.fight_detector.detect(frame, conf_threshold=0.5)
                     fire_detections = self.fire_detector.detect(frame, conf_threshold=0.5)
+                    weapon_detections = self.weapon_detector.detect(frame, conf_threshold=0.5)
                     
                     # Prepare Metadata
                     import json
                     metadata = {
                         "type": "detections",
                         "fight": fight_detections,
-                        "fire": fire_detections
+                        "fire": fire_detections,
+                        "weapon": weapon_detections
                     }
                     
                     # Send Metadata (Text)
@@ -143,6 +147,8 @@ class VisionSystem:
                         event_type = "Violence"
                     elif fire_detections:
                         event_type = "Fire"
+                    elif weapon_detections:
+                        event_type = "Weapon"
 
                     if event_type:
                         current_time = time.time()
