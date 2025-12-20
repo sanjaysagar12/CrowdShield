@@ -116,46 +116,98 @@ async def upload_video(
         
         created_sessions = []
         conn = sqlite3.connect(DB_NAME)
+        # return dicts
+        conn.row_factory = sqlite3.Row 
         cursor = conn.cursor()
         
-        for recipient in recipients:
-            session_id = str(uuid.uuid4())
-            cursor.execute(
-                "INSERT INTO sessions (session_id, video_path, description, notify_to, status, camera_id, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (session_id, video_path, description, recipient, "pending", camera_id, latitude, longitude)
-            )
-            created_sessions.append({
-                "session_id": session_id,
-                "notify_to": recipient,
-                "status": "pending",
-                "description": description,
-                "description": description,
-                "live_url": f"http://localhost:8000/video_feed/{camera_id}",
-                "video_url": f"http://localhost:8002/videos/{video_filename}",
-                "camera_id": camera_id,
-                "latitude": latitude,
-                "longitude": longitude
-            })
-            
-        conn.commit()
-        conn.close()
+        # Check for active session for this camera within last 30 minutes
+        cursor.execute(
+            "SELECT * FROM sessions WHERE camera_id = ? AND created_at >= datetime('now', '-30 minutes') ORDER BY created_at DESC LIMIT 1",
+            (camera_id,)
+        )
+        active_session = cursor.fetchone()
         
-        # Send WhatsApp notifications
-        for phone in NOTIFY_PHONE_NUMBERS:
-            phone = phone.strip()
-            if phone:
-                try:
-                    session_url = f"http://localhost:3000/session/{created_sessions[0]['session_id']}"
-                    # Use the specific description provided by the agent (e.g., "Security Alert: Fire detected!")
-                    desc = created_sessions[0]['description']
-                    message_text = f"🚨 {desc}\n{session_url}"
-                    requests.post(MESSENGER_API_URL, json={
-                        "phone_no": phone,
-                        "message": message_text
-                    })
-                    print(f"Notification sent to {phone}")
-                except Exception as e:
-                    print(f"Failed to send notification to {phone}: {e}")
+        if active_session:
+            # Update existing session
+            session_id = active_session['session_id']
+            print(f"Updating active session {session_id} for camera {camera_id}")
+            
+            cursor.execute(
+                "UPDATE sessions SET video_path = ?, description = ? WHERE session_id = ?",
+                (video_path, description, session_id)
+            )
+            
+            # Fetch updated session details to return
+            # We construct the response object based on the updated info and existing session data
+            session_data = dict(active_session)
+            session_data['video_path'] = video_path
+            session_data['description'] = description
+            
+            # Helper to format response
+            def format_response(row_dict):
+                cam_id = row_dict.get('camera_id') or "cam1"
+                vid_path = row_dict.get('video_path')
+                vid_filename = os.path.basename(vid_path) if vid_path else ""
+                
+                return {
+                    "session_id": row_dict['session_id'],
+                    "notify_to": row_dict['notify_to'],
+                    "status": row_dict['status'],
+                    "description": row_dict['description'],
+                    "live_url": f"http://localhost:8000/video_feed/{cam_id}",
+                    "video_url": f"http://localhost:8002/videos/{vid_filename}" if vid_filename else "",
+                    "camera_id": cam_id,
+                    "latitude": row_dict.get('latitude') or "0.0",
+                    "longitude": row_dict.get('longitude') or "0.0"
+                }
+
+            created_sessions.append(format_response(session_data))
+            
+            # Commit changes
+            conn.commit()
+            conn.close()
+            
+            # SKIP Notification for updates
+            print(f"Skipping notification for updated session {session_id}")
+            
+        else:
+            # Create NEW session
+            for recipient in recipients:
+                session_id = str(uuid.uuid4())
+                cursor.execute(
+                    "INSERT INTO sessions (session_id, video_path, description, notify_to, status, camera_id, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (session_id, video_path, description, recipient, "pending", camera_id, latitude, longitude)
+                )
+                created_sessions.append({
+                    "session_id": session_id,
+                    "notify_to": recipient,
+                    "status": "pending",
+                    "description": description,
+                    "live_url": f"http://localhost:8000/video_feed/{camera_id}",
+                    "video_url": f"http://localhost:8002/videos/{video_filename}",
+                    "camera_id": camera_id,
+                    "latitude": latitude,
+                    "longitude": longitude
+                })
+                
+            conn.commit()
+            conn.close()
+            
+            # Send WhatsApp notifications (ONLY for new sessions)
+            for phone in NOTIFY_PHONE_NUMBERS:
+                phone = phone.strip()
+                if phone:
+                    try:
+                        session_url = f"http://localhost:3000/session/{created_sessions[0]['session_id']}"
+                        desc = created_sessions[0]['description']
+                        message_text = f"🚨 {desc}\n{session_url}"
+                        requests.post(MESSENGER_API_URL, json={
+                            "phone_no": phone,
+                            "message": message_text
+                        })
+                        print(f"Notification sent to {phone}")
+                    except Exception as e:
+                        print(f"Failed to send notification to {phone}: {e}")
         
         return created_sessions
 
