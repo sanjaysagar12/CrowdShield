@@ -87,7 +87,8 @@ class VisionSystem:
         print(f"!!! {event_type} DETECTED !!! Saving clip to {filepath}")
         
         # Save video
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        # Use avc1 (H.264) for better browser compatibility
+        fourcc = cv2.VideoWriter_fourcc(*'avc1')
         out = cv2.VideoWriter(str(filepath), fourcc, FPS, (self.width, self.height))
         
         for frame in frame_buffer_snapshot:
