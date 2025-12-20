@@ -13,7 +13,7 @@ class FightDetector:
         if model_path is None:
             # Default path handling
             current_dir = os.path.dirname(os.path.abspath(__file__))
-            model_path = os.path.join(current_dir, 'yolov8', 'yolo_small_weights.pt')
+            model_path = os.path.join(current_dir, 'yolov8', 'yolos8.pt')
             
         print(f"Loading Fight Detection Model from: {model_path}")
         self.model = YOLO(model_path)

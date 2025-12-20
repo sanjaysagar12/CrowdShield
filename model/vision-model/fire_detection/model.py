@@ -13,7 +13,7 @@ class FireDetector:
         if model_path is None:
             # Default path handling
             current_dir = os.path.dirname(os.path.abspath(__file__))
-            model_path = os.path.join(current_dir, 'yolov8', 'weights', 'best.pt')
+            model_path = os.path.join(current_dir, 'yolov8', 'yolon8.pt')
             
         print(f"Loading Fire Detection Model from: {model_path}")
         self.model = YOLO(model_path)

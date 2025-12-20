@@ -11,7 +11,7 @@ class CrowdDetector:
                               If None, use 'yolov8n.pt' which will be downloaded automatically.
         """
         if model_path is None:
-            model_path = os.path.join(os.path.dirname(__file__), 'yolov8n.pt')
+            model_path = os.path.join(os.path.dirname(__file__), 'yolo', 'yolov8n.pt')
             
         print(f"Loading Crowd Detection Model from: {model_path}")
         self.model = YOLO(model_path)
