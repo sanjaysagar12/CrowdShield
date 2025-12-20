@@ -24,9 +24,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount video directory to serve static files
-app.mount("/videos", StaticFiles(directory="uploaded_videos"), name="videos")
-
 # Configuration
 UPLOAD_DIR = "uploaded_videos"
 DB_NAME = "crowd_shield.db"
@@ -36,10 +33,17 @@ NOTIFY_PHONE_NUMBERS = os.getenv("NOTIFY_PHONE_NUMBERS", "").split(",")
 # Ensure upload directory exists
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# Mount video directory to serve static files
+app.mount("/videos", StaticFiles(directory="uploaded_videos"), name="videos")
+
 # Database Setup
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
+    
+    # DROP existing table to reset schema (Requested by user)
+    cursor.execute("DROP TABLE IF EXISTS sessions")
+    
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS sessions (
             session_id TEXT PRIMARY KEY,
@@ -47,27 +51,15 @@ def init_db():
             description TEXT,
             notify_to TEXT,
             status TEXT DEFAULT 'pending',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            camera_id TEXT,
+            latitude TEXT,
+            longitude TEXT,
+            severity TEXT,
+            confidence TEXT
         )
     ''')
     
-    # Check if new columns exist, if not add them (Migration)
-    # This is a simple migration strategy for this dev environment
-    try:
-        cursor.execute("ALTER TABLE sessions ADD COLUMN camera_id TEXT")
-    except sqlite3.OperationalError:
-        pass # Column likely exists
-        
-    try:
-        cursor.execute("ALTER TABLE sessions ADD COLUMN latitude TEXT")
-    except sqlite3.OperationalError:
-        pass
-        
-    try:
-        cursor.execute("ALTER TABLE sessions ADD COLUMN longitude TEXT")
-    except sqlite3.OperationalError:
-        pass
-
     conn.commit()
     conn.close()
 
@@ -85,6 +77,8 @@ class SessionResponse(BaseModel):
     camera_id: str
     latitude: str
     longitude: str
+    severity: str
+    confidence: str
 
 class StatusUpdate(BaseModel):
     status: str  # 'approved' or 'rejected'
@@ -96,7 +90,9 @@ async def upload_video(
     notify_to: str = Form(...),  # Comma-separated list of recipients
     camera_id: str = Form("cam1"),
     latitude: str = Form("0.0"),
-    longitude: str = Form("0.0")
+    longitude: str = Form("0.0"),
+    severity: str = Form("Normal"),
+    confidence: str = Form("Unknown")
 ):
     """
     Upload a video and create a session for each recipient in the notify_to list.
@@ -133,8 +129,8 @@ async def upload_video(
             print(f"Updating active session {session_id} for camera {camera_id}")
             
             cursor.execute(
-                "UPDATE sessions SET video_path = ?, description = ? WHERE session_id = ?",
-                (video_path, description, session_id)
+                "UPDATE sessions SET video_path = ?, description = ?, severity = ?, confidence = ? WHERE session_id = ?",
+                (video_path, description, severity, confidence, session_id)
             )
             
             # Fetch updated session details to return
@@ -142,6 +138,8 @@ async def upload_video(
             session_data = dict(active_session)
             session_data['video_path'] = video_path
             session_data['description'] = description
+            session_data['severity'] = severity
+            session_data['confidence'] = confidence
             
             # Helper to format response
             def format_response(row_dict):
@@ -158,7 +156,9 @@ async def upload_video(
                     "video_url": f"http://localhost:8002/videos/{vid_filename}" if vid_filename else "",
                     "camera_id": cam_id,
                     "latitude": row_dict.get('latitude') or "0.0",
-                    "longitude": row_dict.get('longitude') or "0.0"
+                    "longitude": row_dict.get('longitude') or "0.0",
+                    "severity": row_dict.get('severity') or "Normal",
+                    "confidence": row_dict.get('confidence') or "Unknown"
                 }
 
             created_sessions.append(format_response(session_data))
@@ -175,8 +175,8 @@ async def upload_video(
             for recipient in recipients:
                 session_id = str(uuid.uuid4())
                 cursor.execute(
-                    "INSERT INTO sessions (session_id, video_path, description, notify_to, status, camera_id, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (session_id, video_path, description, recipient, "pending", camera_id, latitude, longitude)
+                    "INSERT INTO sessions (session_id, video_path, description, notify_to, status, camera_id, latitude, longitude, severity, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (session_id, video_path, description, recipient, "pending", camera_id, latitude, longitude, severity, confidence)
                 )
                 created_sessions.append({
                     "session_id": session_id,
@@ -187,7 +187,9 @@ async def upload_video(
                     "video_url": f"http://localhost:8002/videos/{video_filename}",
                     "camera_id": camera_id,
                     "latitude": latitude,
-                    "longitude": longitude
+                    "longitude": longitude,
+                    "severity": severity,
+                    "confidence": confidence
                 })
                 
             conn.commit()
@@ -200,7 +202,7 @@ async def upload_video(
                     try:
                         session_url = f"http://localhost:3000/session/{created_sessions[0]['session_id']}"
                         desc = created_sessions[0]['description']
-                        message_text = f"🚨 {desc}\n{session_url}"
+                        message_text = f"🚨 {desc}\nSeverity: {severity}\nConfidence: {confidence}\n{session_url}"
                         requests.post(MESSENGER_API_URL, json={
                             "phone_no": phone,
                             "message": message_text
@@ -253,28 +255,29 @@ async def get_session(session_id: str):
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
-    cursor.execute("SELECT session_id, notify_to, status, description, video_path, camera_id, latitude, longitude FROM sessions WHERE session_id = ?", (session_id,))
+    cursor.execute("SELECT session_id, notify_to, status, description, video_path, camera_id, latitude, longitude, severity, confidence FROM sessions WHERE session_id = ?", (session_id,))
     row = cursor.fetchone()
     conn.close()
     
     if not row:
         raise HTTPException(status_code=404, detail="Session not found")
+    cam_id = row['camera_id'] or "cam1"
+    vid_path = row['video_path']
+    vid_filename = os.path.basename(vid_path) if vid_path else ""
     
-    response = dict(row)
-    # Ensure backward compatibility if columns were NULL
-    cam_id = response.get('camera_id') or "cam1"
-    response['live_url'] = f"http://localhost:8000/video_feed/{cam_id}"
-    response['camera_id'] = cam_id
-    response['latitude'] = response.get('latitude') or "0.0"
-    response['longitude'] = response.get('longitude') or "0.0"
-    
-    if response.get('video_path'):
-         filename = os.path.basename(response['video_path'])
-         response['video_url'] = f"http://localhost:8002/videos/{filename}"
-    else:
-         response['video_url'] = ""
-
-    return response
+    return {
+        "session_id": row['session_id'],
+        "notify_to": row['notify_to'],
+        "status": row['status'],
+        "description": row['description'],
+        "live_url": f"http://localhost:8000/video_feed/{cam_id}",
+        "video_url": f"http://localhost:8002/videos/{vid_filename}" if vid_filename else "",
+        "camera_id": cam_id,
+        "latitude": row['latitude'] or "0.0",
+        "longitude": row['longitude'] or "0.0",
+        "severity": row['severity'] or "Normal",
+        "confidence": row['confidence'] or "Unknown"
+    }
 
 @app.get("/sessions", response_model=List[SessionResponse])
 async def list_sessions():
@@ -282,7 +285,7 @@ async def list_sessions():
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("SELECT session_id, notify_to, status, description, video_path, camera_id, latitude, longitude FROM sessions")
+    cursor.execute("SELECT session_id, notify_to, status, description, video_path, camera_id, latitude, longitude, severity, confidence FROM sessions")
     rows = cursor.fetchall()
     conn.close()
     
@@ -291,7 +294,12 @@ async def list_sessions():
         d = dict(row)
         cam_id = d.get('camera_id') or "cam1"
         d['live_url'] = f"http://localhost:8000/video_feed/{cam_id}"
-        pass # video_url logic follows
+        d['camera_id'] = cam_id
+        d['latitude'] = d.get('latitude') or "0.0"
+        d['longitude'] = d.get('longitude') or "0.0"
+        d['severity'] = d.get('severity') or "Normal"
+        d['confidence'] = d.get('confidence') or "Unknown"
+        
         if d.get('video_path'):
             filename = os.path.basename(d['video_path'])
             d['video_url'] = f"http://localhost:8002/videos/{filename}"

@@ -28,7 +28,7 @@ except ImportError as e:
 CAMERA_ID = "cam1"
 LIVESTREAM_URL = "ws://localhost:8000/ws/push/cam1"
 AGENT_URL = "http://localhost:8001/agent"
-BUFFER_SECONDS = 5
+BUFFER_SECONDS = 20
 FPS = 15
 LATITUDE = "0.0"
 LONGITUDE = "0.0"
@@ -61,7 +61,32 @@ class VisionSystem:
         
         # Create recordings directory
         self.rec_dir = Path("recordings")
-        self.rec_dir.mkdir(exist_ok=True)
+        self.latest_frame = None
+        self.frame_lock = threading.Lock()
+        
+        # Start capture thread
+        self.capture_thread = threading.Thread(target=self.capture_worker, daemon=True)
+        self.capture_thread.start()
+
+    def capture_worker(self):
+        """Thread to capture frames at fixed FPS."""
+        print("Capture thread started.")
+        while self.is_running:
+            if not self.cap.isOpened():
+                time.sleep(1)
+                continue
+                
+            ret, frame = self.cap.read()
+            if ret:
+                with self.frame_lock:
+                    self.latest_frame = frame
+                    self.frame_buffer.append(frame)
+            else:
+                print("Warning: Could not read frame in capture thread.")
+                time.sleep(1)
+            
+            # Maintain approximate FPS
+            time.sleep(1.0 / FPS)
 
     def upload_event_worker(self, video_path, event_type):
         """Thread worker to upload video to agent."""
@@ -108,19 +133,19 @@ class VisionSystem:
             print("Connected to Livestream WebSocket.")
             try:
                 while self.is_running:
-                    ret, frame = self.cap.read()
-                    if not ret:
-                        print("Failed to read frame.")
+                    # Get latest frame from thread
+                    frame = None
+                    with self.frame_lock:
+                        if self.latest_frame is not None:
+                            frame = self.latest_frame.copy()
+                            
+                    if frame is None:
+                        # No frame yet
                         await asyncio.sleep(0.1)
                         continue
                         
-                    self.frame_buffer.append(frame)
-                    
                     # Run Detections
-                    # NOTE: Running sequentially here for simplicity. 
-                    # For higher FPS, could move to thread pool, but YOLO is fast on GPU, 
-                    # slower on CPU. Use small weights.
-                    
+                    # These run as fast as possible (likely slower than FPS)
                     fight_detections = self.fight_detector.detect(frame, conf_threshold=0.5)
                     fire_detections = self.fire_detector.detect(frame, conf_threshold=0.5)
                     weapon_detections = self.weapon_detector.detect(frame, conf_threshold=0.5)
@@ -154,13 +179,18 @@ class VisionSystem:
                         current_time = time.time()
                         if current_time - self.last_event_time > self.cooldown_seconds:
                             self.last_event_time = current_time
-                            # Annotate frame for recording only
-                            rec_frame = frame.copy()
-                            cv2.putText(rec_frame, f"ALERT: {event_type}", (50, 50),
-                                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
-                            # Create a snapshot with this annotated frame as the latest
-                            snapshot = list(self.frame_buffer)
-                            snapshot[-1] = rec_frame 
+                            
+                            # Get snapshot of buffer safely
+                            with self.frame_lock:
+                                snapshot = list(self.frame_buffer)
+                                
+                            # Annotate the last frame in snapshot
+                            if snapshot:
+                                rec_frame = snapshot[-1].copy()
+                                cv2.putText(rec_frame, f"ALERT: {event_type}", (50, 50),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
+                                snapshot[-1] = rec_frame
+                                
                             self.trigger_event(snapshot, event_type)
 
                     # Send Clean Frame (Binary)
@@ -173,7 +203,7 @@ class VisionSystem:
                         break # Break inner loop to reconnect
 
                     # Small sleep to yield to event loop
-                    await asyncio.sleep(0.001)
+                    await asyncio.sleep(0.01)
             except websockets.exceptions.ConnectionClosed:
                 print("WebSocket connection closed. Reconnecting...")
                 await asyncio.sleep(3)
@@ -187,4 +217,5 @@ if __name__ == "__main__":
         asyncio.run(system.run())
     except KeyboardInterrupt:
         print("Stopping...")
+        system.is_running = False
         system.cap.release()

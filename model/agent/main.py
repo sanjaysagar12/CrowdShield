@@ -54,28 +54,53 @@ def process_video_with_gemini(video_path: Path):
         print("Sending frame to Gemini for validation...")
         model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content([
-            "Analyze this image for safety. Classify it as one of the following:\n0 - Fire\n1 - Violence\n2 - Normal/Safe\nReturn ONLY the digit (0, 1, or 2).",
+            "Analyze this image for safety. Classify it as one of the following:\n0 - Fire\n1 - Violence\n2 - Normal/Safe\nAlso provide a Severity (Critical/Warning/Informational) and a Confidence score (0-100%).\nReturn the response in this format:\nClass: [0/1/2]\nSeverity: [Severity]\nConfidence: [Score%]",
             pil_image
         ])
         
         content = response.text.strip()
         print(f"Gemini response: {content}")
         
-        if "0" in content:
-            return "Fire"
-        elif "1" in content:
-            return "Violence"
-        else:
-            return "Normal"
+        # Parse response
+        event_type = "Normal"
+        severity = "Normal"
+        confidence = "0%"
+        
+        lines = content.split('\n')
+        for line in lines:
+            if "Class:" in line:
+                if "0" in line: event_type = "Fire"
+                elif "1" in line: event_type = "Violence"
+                else: event_type = "Normal"
+            if "Severity:" in line:
+                severity = line.split("Severity:")[1].strip()
+            if "Confidence:" in line:
+                confidence = line.split("Confidence:")[1].strip()
+        
+        return {
+            "event_type": event_type,
+            "severity": severity,
+            "confidence": confidence
+        }
 
     except Exception as e:
         print(f"Gemini error: {e}")
-        return "Error"
+        print("WARNING: Using dummy data for session due to API error.")
+        # Fallback to dummy data as requested
+        return {
+            "event_type": "Violence",
+            "severity": "Critical",
+            "confidence": "Simulated (API Limit)"
+        }
 
-def handle_event(video_path: Path, event_type: str, camera_id: str, latitude: str, longitude: str):
+def handle_event(video_path: Path, event_data: dict, camera_id: str, latitude: str, longitude: str):
     """
     Sends the video to the Crowd Shield API to create a session for the event.
     """
+    event_type = event_data['event_type']
+    severity = event_data['severity']
+    confidence = event_data['confidence']
+    
     print(f"{event_type} detected. Sending to Crowd Shield API...")
     crowd_shield_url = "http://localhost:8002/upload"
     
@@ -89,7 +114,9 @@ def handle_event(video_path: Path, event_type: str, camera_id: str, latitude: st
                 'notify_to': 'admin,security',
                 'camera_id': camera_id,
                 'latitude': latitude,
-                'longitude': longitude
+                'longitude': longitude,
+                'severity': severity,
+                'confidence': confidence
             }
             response = requests.post(crowd_shield_url, files=files, data=data)
             
@@ -116,17 +143,19 @@ async def agent_endpoint(
         print(f"Received video: {file.filename} from {camera_id} at {latitude},{longitude}")
         
         # Analyze video with Gemini
-        event_result = process_video_with_gemini(file_path)
+        result = process_video_with_gemini(file_path)
+        event_result = result['event_type']
         
         if event_result == "Fire" or event_result == "Violence":
-            handle_event(file_path, event_result, camera_id, latitude, longitude)
+            handle_event(file_path, result, camera_id, latitude, longitude)
         else:
             print(f"Event judged as {event_result} (Safe/Normal). No action taken.")
         
         return {
             "filename": file.filename, 
             "status": "processed", 
-            "event_detected": event_result
+            "event_detected": event_result,
+            "details": result
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
