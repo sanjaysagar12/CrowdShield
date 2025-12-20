@@ -51,34 +51,41 @@ def process_video_with_gemini(video_path: Path):
     pil_image = Image.fromarray(rgb_frame)
 
     try:
-        print("Sending frame to Gemini...")
+        print("Sending frame to Gemini for validation...")
         model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content([
-            "Is there a person in this image? Answer with just YES or NO.",
+            "Analyze this image for safety. Classify it as one of the following:\n0 - Fire\n1 - Violence\n2 - Normal/Safe\nReturn ONLY the digit (0, 1, or 2).",
             pil_image
         ])
         
-        content = response.text.strip().upper()
+        content = response.text.strip()
         print(f"Gemini response: {content}")
         
-        # Check if YES is in the response
-        return "YES" in content
+        if "0" in content:
+            return "Fire"
+        elif "1" in content:
+            return "Violence"
+        else:
+            return "Normal"
+
     except Exception as e:
         print(f"Gemini error: {e}")
-        return False
+        return "Error"
 
-def handle_person_not_present(video_path: Path, camera_id: str, latitude: str, longitude: str):
+def handle_event(video_path: Path, event_type: str, camera_id: str, latitude: str, longitude: str):
     """
-    Sends the video to the Crowd Shield API to create a session.
+    Sends the video to the Crowd Shield API to create a session for the event.
     """
-    print("Person not present. Sending to Crowd Shield API...")
+    print(f"{event_type} detected. Sending to Crowd Shield API...")
     crowd_shield_url = "http://localhost:8002/upload"
+    
+    description = f"Security Alert: {event_type} detected!"
     
     try:
         with open(video_path, 'rb') as f:
             files = {'file': (video_path.name, f, 'video/mp4')}
             data = {
-                'description': 'Security Alert: No person detected in monitored area.',
+                'description': description,
                 'notify_to': 'admin,security',
                 'camera_id': camera_id,
                 'latitude': latitude,
@@ -109,17 +116,17 @@ async def agent_endpoint(
         print(f"Received video: {file.filename} from {camera_id} at {latitude},{longitude}")
         
         # Analyze video with Gemini
-        is_person_present = process_video_with_gemini(file_path)
+        event_result = process_video_with_gemini(file_path)
         
-        if not is_person_present:
-            handle_person_not_present(file_path, camera_id, latitude, longitude)
+        if event_result == "Fire" or event_result == "Violence":
+            handle_event(file_path, event_result, camera_id, latitude, longitude)
         else:
-            print("Person detected by Gemini.")
+            print(f"Event judged as {event_result} (Safe/Normal). No action taken.")
         
         return {
             "filename": file.filename, 
             "status": "processed", 
-            "person_detected": is_person_present
+            "event_detected": event_result
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

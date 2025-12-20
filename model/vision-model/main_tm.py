@@ -16,6 +16,7 @@ def main():
 	parser.add_argument("--long", type=str, default="0.0", help="Longitude (default: 0.0)")
 	parser.add_argument("--tm-model", default="converted_keras/keras_model.h5", help="Path to TM .h5 model")
 	parser.add_argument("--tm-labels", default="converted_keras/labels.txt", help="Path to TM labels file")
+	parser.add_argument("--device-index", type=int, default=1, help="Camera device index (default: 1, often OBS Virtual Camera)")
 	args = parser.parse_args()
 
 	tm_model = None
@@ -61,9 +62,10 @@ def main():
 
 	# Open webcam
 	# Use CAP_DSHOW to avoid MSMF errors on Windows
-	cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+	print(f"Opening camera device index: {args.device_index}")
+	cap = cv2.VideoCapture(args.device_index, cv2.CAP_DSHOW)
 	if not cap.isOpened():
-		print("Failed to open webcam (device 0)")
+		print(f"Failed to open webcam (device {args.device_index})")
 		sys.exit(1)
 
 	fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
@@ -85,6 +87,7 @@ def main():
 	print(f"Streaming to: {args.stream_url}")
 	print(f"Mode: Teachable Machine")
 	print(f"Camera ID: {args.camera_id}, Location: {args.lat}, {args.long}")
+	print("--- Model Started and Running ---")
 
 	# Parse stream URL to get websocket URL if needed, or assume argument provided is correct base
 	# If args.stream_url is http, convert to ws for the websocket connection
@@ -150,10 +153,21 @@ def main():
 								   cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
 						# Logic: Normal -> Safe (presence=True), Fire/Violence -> Trigger (presence=False)
+						status_text = "SAFE"
+						status_color = (0, 255, 0) # Green
+
 						if "Normal" in class_name:
 							presence = True
+							status_text = "SAFE"
+							status_color = (0, 255, 0)
 						elif "Fire" in class_name or "Violence" in class_name:
 							presence = False
+							status_text = f"ALERT: {class_name}"
+							status_color = (0, 0, 255) # Red
+						
+						# Draw status on frame
+						cv2.putText(annotated_frame, status_text, (10, 70), 
+								   cv2.FONT_HERSHEY_SIMPLEX, 1, status_color, 2)
 						
 						# Push frame via WebSocket
 						try:
@@ -176,7 +190,7 @@ def main():
 						out_path = save_dir / f"clip_event_{timestamp}_{clip_count}.mp4"
 						fourcc = cv2.VideoWriter_fourcc(*'avc1')
 						writer = cv2.VideoWriter(str(out_path), fourcc, fps, (width, height))
-						print(f"Fire/Violence detected — saving {args.buffer_seconds}s clip to {out_path}")
+						print(f"!!! EVENT DETECTED ({class_name}) !!! Saving {args.buffer_seconds}s clip to {out_path}")
 						for f in frame_buffer:
 							writer.write(f)
 						writer.release()
@@ -193,7 +207,8 @@ def main():
 										'latitude': lat,
 										'longitude': long
 									}
-									response = requests.post('http://localhost:8001/agent', files=files, data=data_payload)
+									# Add timeout to prevent hanging
+									response = requests.post('http://localhost:8001/agent', files=files, data=data_payload, timeout=30)
 									if response.status_code == 200:
 										print(f"Successfully sent {path.name} to agent.")
 									else:
@@ -210,8 +225,12 @@ def main():
 
 						clip_count += 1
 						last_presence = False
+						print("State changed to ALERT (Recording sent). Waiting for Normal state to reset...")
 
-					if presence:
+					if presence and not last_presence:
+						print("State returned to NORMAL. System re-armed for next event.")
+						last_presence = True
+					elif presence:
 						last_presence = True
 
 					await asyncio.sleep(0.001)
