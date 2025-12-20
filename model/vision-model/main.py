@@ -31,6 +31,8 @@ BUFFER_SECONDS = 5
 FPS = 30
 LATITUDE = "0.0"
 LONGITUDE = "0.0"
+# Camera Index: 0 is usually the built-in webcam. 1 is often the OBS Virtual Camera if the webcam is present.
+CAMERA_INDEX = 1 
 
 class VisionSystem:
     def __init__(self):
@@ -38,10 +40,12 @@ class VisionSystem:
         self.fight_detector = FightDetector()
         self.fire_detector = FireDetector()
         
-        self.cap = cv2.VideoCapture(0) # Default camera
+        print(f"Opening Camera Index: {CAMERA_INDEX} (Targeting OBS Virtual Camera)")
+        self.cap = cv2.VideoCapture(CAMERA_INDEX)
+        
         if not self.cap.isOpened():
-            print("Warning: Could not open default camera (0). Trying 1...")
-            self.cap = cv2.VideoCapture(1)
+            print(f"Warning: Could not open camera {CAMERA_INDEX}. Trying default 0...")
+            self.cap = cv2.VideoCapture(0)
             
         self.width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 640)
         self.height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 480)
