@@ -117,46 +117,48 @@ class VisionSystem:
                     fight_detections = self.fight_detector.detect(frame, conf_threshold=0.5)
                     fire_detections = self.fire_detector.detect(frame, conf_threshold=0.5)
                     
-                    event_type = None
-                    annotated_frame = frame.copy()
+                    # Prepare Metadata
+                    import json
+                    metadata = {
+                        "type": "detections",
+                        "fight": fight_detections,
+                        "fire": fire_detections
+                    }
                     
-                    # Annotate and check for events
+                    # Send Metadata (Text)
+                    try:
+                        await websocket.send(json.dumps(metadata))
+                    except Exception as e:
+                        print(f"WS Send JSON Error: {e}")
+                        break
+
+                    # Check for events to trigger recording (local logic)
+                    event_type = None
                     if fight_detections:
                         event_type = "Violence"
-                        for d in fight_detections:
-                            x1, y1, x2, y2 = map(int, d['bbox'])
-                            cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
-                            cv2.putText(annotated_frame, f"Fight {d['confidence']:.2f}", (x1, y1 - 10),
-                                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-                                       
-                    if fire_detections:
-                        # Prioritize Fire? Or just keep Violence if both? Let's say Fire.
-                        event_type = "Fire" 
-                        for d in fire_detections:
-                            x1, y1, x2, y2 = map(int, d['bbox'])
-                            cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 165, 255), 2)
-                            cv2.putText(annotated_frame, f"Fire {d['confidence']:.2f}", (x1, y1 - 10),
-                                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 165, 255), 2)
+                    elif fire_detections:
+                        event_type = "Fire"
 
-                    # Trigger Event if Cooldown passed
                     if event_type:
                         current_time = time.time()
                         if current_time - self.last_event_time > self.cooldown_seconds:
                             self.last_event_time = current_time
-                            # Pass a COPY of current buffer
-                            self.trigger_event(list(self.frame_buffer), event_type)
-                            
-                        # Add Alert Text
-                        cv2.putText(annotated_frame, f"ALERT: {event_type}", (50, 50),
-                                   cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
+                            # Annotate frame for recording only
+                            rec_frame = frame.copy()
+                            cv2.putText(rec_frame, f"ALERT: {event_type}", (50, 50),
+                                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
+                            # Create a snapshot with this annotated frame as the latest
+                            snapshot = list(self.frame_buffer)
+                            snapshot[-1] = rec_frame 
+                            self.trigger_event(snapshot, event_type)
 
-                    # Send to Livestream
+                    # Send Clean Frame (Binary)
                     try:
-                        ret_enc, buffer = cv2.imencode('.jpg', annotated_frame)
+                        ret_enc, buffer = cv2.imencode('.jpg', frame)
                         if ret_enc:
                             await websocket.send(buffer.tobytes())
                     except Exception as e:
-                        print(f"WS Send Error: {e}")
+                        print(f"WS Send Image Error: {e}")
                         break # Break inner loop to reconnect
 
                     # Small sleep to yield to event loop
