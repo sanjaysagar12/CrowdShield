@@ -272,12 +272,65 @@ export default function SessionPage() {
                 </div>
 
                 {/* Action Buttons */}
+                {/* Action Buttons */}
                 <div className="flex gap-2 mt-3 pt-2 border-t border-gray-100">
-                  <button className="flex-1 text-[10px] font-bold text-green-600 bg-green-50 px-2 py-1.5 rounded hover:bg-green-100 transition-colors flex items-center justify-center gap-1">
-                    <span>✓</span> APPROVE
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const handleApprove = async () => {
+                        try {
+                          const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8002";
+                          await fetch(`${apiUrl}/session/${session.session_id}/approve`, { method: "POST" });
+                          // Optimistic update or refetch
+                          const updatedSessions = sessions.map(s =>
+                            s.session_id === session.session_id ? { ...s, status: 'approved' } : s
+                          );
+                          setSessions(updatedSessions);
+                          if (currentSession?.session_id === session.session_id) {
+                            setCurrentSession({ ...currentSession, status: 'approved' });
+                          }
+                        } catch (err) {
+                          console.error("Failed to approve", err);
+                        }
+                      };
+                      handleApprove();
+                    }}
+                    className={`flex-1 text-[10px] font-bold px-2 py-1.5 rounded transition-colors flex items-center justify-center gap-1 ${session.status === 'approved'
+                        ? 'bg-green-100 text-green-700 cursor-default'
+                        : 'bg-green-50 text-green-600 hover:bg-green-100'
+                      }`}
+                    disabled={session.status === 'approved'}
+                  >
+                    <span>{session.status === 'approved' ? '✓ APPROVED' : '✓ APPROVE'}</span>
                   </button>
-                  <button className="flex-1 text-[10px] font-bold text-red-600 bg-red-50 px-2 py-1.5 rounded hover:bg-red-100 transition-colors flex items-center justify-center gap-1">
-                    <span>✕</span> REJECT
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const handleReject = async () => {
+                        try {
+                          const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8002";
+                          await fetch(`${apiUrl}/session/${session.session_id}/reject`, { method: "POST" });
+                          // Optimistic update
+                          const updatedSessions = sessions.map(s =>
+                            s.session_id === session.session_id ? { ...s, status: 'rejected' } : s
+                          );
+                          setSessions(updatedSessions);
+                          if (currentSession?.session_id === session.session_id) {
+                            setCurrentSession({ ...currentSession, status: 'rejected' });
+                          }
+                        } catch (err) {
+                          console.error("Failed to reject", err);
+                        }
+                      };
+                      handleReject();
+                    }}
+                    className={`flex-1 text-[10px] font-bold px-2 py-1.5 rounded transition-colors flex items-center justify-center gap-1 ${session.status === 'rejected'
+                        ? 'bg-red-100 text-red-700 cursor-default'
+                        : 'bg-red-50 text-red-600 hover:bg-red-100'
+                      }`}
+                    disabled={session.status === 'rejected'}
+                  >
+                    <span>{session.status === 'rejected' ? '✕ REJECTED' : '✕ REJECT'}</span>
                   </button>
                 </div>
               </div>

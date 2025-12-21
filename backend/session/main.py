@@ -219,13 +219,19 @@ async def upload_video(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# Firebase Configuration
+FIREBASE_HOST = os.getenv("FIREBASE_HOST", "crowdshield-5d9bd-default-rtdb.asia-southeast1.firebasedatabase.app")
+FIREBASE_AUTH = os.getenv("FIREBASE_AUTH", "GFKbvVRU3A4camE35uFRskCACmNf1Kvi5VHOsOTd")
+FIREBASE_URL = f"https://{FIREBASE_HOST}/led/state.json?auth={FIREBASE_AUTH}"
+
 @app.post("/session/{session_id}/approve")
 async def approve_session(session_id: str):
-    """Approve a specific session."""
+    """Approve a specific session and trigger Firebase event."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
     cursor.execute("SELECT session_id FROM sessions WHERE session_id = ?", (session_id,))
+ 
     if not cursor.fetchone():
         conn.close()
         raise HTTPException(status_code=404, detail="Session not found")
@@ -233,6 +239,17 @@ async def approve_session(session_id: str):
     cursor.execute("UPDATE sessions SET status = 'approved' WHERE session_id = ?", (session_id,))
     conn.commit()
     conn.close()
+
+    # Trigger Firebase
+    try:
+        response = requests.put(FIREBASE_URL, json=1)
+        if response.status_code == 200:
+            print(f"Firebase updated successfully for session {session_id}")
+        else:
+            print(f"Failed to update Firebase: {response.status_code} {response.text}")
+    except Exception as e:
+        print(f"Error updating Firebase: {e}")
+
     return {"session_id": session_id, "status": "approved"}
 
 @app.post("/session/{session_id}/reject")
