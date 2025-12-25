@@ -24,10 +24,14 @@ except ImportError as e:
     print("Ensure you are running from 'model/vision-model/' or that the directories 'fight_detection' and 'fire_detection' are accessible.")
     sys.exit(1)
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 # Configuration
-CAMERA_ID = "cam1"
-LIVESTREAM_URL = "ws://localhost:8000/ws/push/cam1"
-AGENT_URL = "http://localhost:8001/agent"
+CAMERA_ID = os.getenv("CAMERA_ID", "cam1")
+LIVESTREAM_URL = os.getenv("LIVESTREAM_URL", "ws://livestream-crowdshield.portos.cloud/ws/push/cam1")
+AGENT_URL = os.getenv("AGENT_URL", "https://agent-crowdshield.portos.cloud/agent")
 BUFFER_SECONDS = 20
 FPS = 15
 LATITUDE = "0.0"
@@ -144,11 +148,13 @@ class VisionSystem:
                         await asyncio.sleep(0.1)
                         continue
                         
-                    # Run Detections
-                    # These run as fast as possible (likely slower than FPS)
-                    fight_detections = self.fight_detector.detect(frame, conf_threshold=0.5)
-                    fire_detections = self.fire_detector.detect(frame, conf_threshold=0.5)
-                    weapon_detections = self.weapon_detector.detect(frame, conf_threshold=0.5)
+                    # Run Detections in parallel
+                    # Using asyncio.gather to run all detections concurrently
+                    fight_detections, fire_detections, weapon_detections = await asyncio.gather(
+                        asyncio.to_thread(self.fight_detector.detect, frame, conf_threshold=0.5),
+                        asyncio.to_thread(self.fire_detector.detect, frame, conf_threshold=0.5),
+                        asyncio.to_thread(self.weapon_detector.detect, frame, conf_threshold=0.5)
+                    )
                     
                     # Prepare Metadata
                     import json
@@ -167,13 +173,24 @@ class VisionSystem:
                         break
 
                     # Check for events to trigger recording (local logic)
+                    # Select the detection with the highest confidence score
                     event_type = None
-                    if fight_detections:
-                        event_type = "Violence"
-                    elif fire_detections:
-                        event_type = "Fire"
-                    elif weapon_detections:
-                        event_type = "Weapon"
+                    max_confidence = 0.0
+                    
+                    for det in fight_detections:
+                        if det["confidence"] > max_confidence:
+                            max_confidence = det["confidence"]
+                            event_type = "Violence"
+                    
+                    for det in fire_detections:
+                        if det["confidence"] > max_confidence:
+                            max_confidence = det["confidence"]
+                            event_type = "Fire"
+                    
+                    for det in weapon_detections:
+                        if det["confidence"] > max_confidence:
+                            max_confidence = det["confidence"]
+                            event_type = "Weapon"
 
                     if event_type:
                         current_time = time.time()
